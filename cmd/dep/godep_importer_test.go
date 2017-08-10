@@ -19,24 +19,28 @@ import (
 const testProjectRoot = "github.com/golang/notexist"
 
 func TestGodepConfig_Convert(t *testing.T) {
-	testCases := map[string]struct {
-		json               godepJSON
-		wantConvertErr     bool
-		matchPairedVersion bool
-		projectRoot        gps.ProjectRoot
-		wantConstraint     string
-		wantRevision       gps.Revision
-		wantVersion        string
-		wantLockCount      int
-	}{
-		"convert project": {
-			json: godepJSON{
-				Imports: []godepPackage{
-					{
-						ImportPath: "github.com/sdboyer/deptest",
-						// This revision has 2 versions attached to it, v1.0.0 & v0.8.0.
-						Rev:     "ff2948a2ac8f538c4ecd55962e919d1e13e74baf",
-						Comment: "v0.8.0",
+	h := test.NewHelper(t)
+	defer h.Cleanup()
+
+	ctx := newTestContext(h)
+	sm, err := ctx.SourceManager()
+	h.Must(err)
+	defer sm.Release()
+	g := newGodepImporter(discardLogger, true, sm)
+
+	testCases := []importConverterTestCase{
+		{
+			name:      "convert project",
+			converter: g,
+			input: godepImporterInput{
+				json: godepJSON{
+					Imports: []godepPackage{
+						{
+							ImportPath: "github.com/sdboyer/deptest",
+							// This revision has 2 versions attached to it, v1.0.0 & v0.8.0.
+							Rev:     "ff2948a2ac8f538c4ecd55962e919d1e13e74baf",
+							Comment: "v0.8.0",
+						},
 					},
 				},
 			},
@@ -47,13 +51,17 @@ func TestGodepConfig_Convert(t *testing.T) {
 			wantVersion:        "v0.8.0",
 			wantLockCount:      1,
 		},
-		"with semver suffix": {
-			json: godepJSON{
-				Imports: []godepPackage{
-					{
-						ImportPath: "github.com/sdboyer/deptest",
-						Rev:        "ff2948a2ac8f538c4ecd55962e919d1e13e74baf",
-						Comment:    "v1.12.0-12-g2fd980e",
+		{
+			name:      "with semver suffix",
+			converter: g,
+			input: godepImporterInput{
+				json: godepJSON{
+					Imports: []godepPackage{
+						{
+							ImportPath: "github.com/sdboyer/deptest",
+							Rev:        "ff2948a2ac8f538c4ecd55962e919d1e13e74baf",
+							Comment:    "v1.12.0-12-g2fd980e",
+						},
 					},
 				},
 			},
@@ -63,13 +71,17 @@ func TestGodepConfig_Convert(t *testing.T) {
 			wantLockCount:      1,
 			wantVersion:        "v1.0.0",
 		},
-		"empty comment": {
-			json: godepJSON{
-				Imports: []godepPackage{
-					{
-						ImportPath: "github.com/sdboyer/deptest",
-						// This revision has 2 versions attached to it, v1.0.0 & v0.8.0.
-						Rev: "ff2948a2ac8f538c4ecd55962e919d1e13e74baf",
+		{
+			name:      "empty comment",
+			converter: g,
+			input: godepImporterInput{
+				json: godepJSON{
+					Imports: []godepPackage{
+						{
+							ImportPath: "github.com/sdboyer/deptest",
+							// This revision has 2 versions attached to it, v1.0.0 & v0.8.0.
+							Rev: "ff2948a2ac8f538c4ecd55962e919d1e13e74baf",
+						},
 					},
 				},
 			},
@@ -80,34 +92,46 @@ func TestGodepConfig_Convert(t *testing.T) {
 			wantVersion:        "v1.0.0",
 			wantLockCount:      1,
 		},
-		"bad input - empty package name": {
-			json: godepJSON{
-				Imports: []godepPackage{{ImportPath: ""}},
+		{
+			name:      "bad input - empty package name",
+			converter: g,
+			input: godepImporterInput{
+				json: godepJSON{
+					Imports: []godepPackage{{ImportPath: ""}},
+				},
 			},
 			wantConvertErr: true,
 		},
-		"bad input - empty revision": {
-			json: godepJSON{
-				Imports: []godepPackage{
-					{
-						ImportPath: "github.com/sdboyer/deptest",
+		{
+			name:      "bad input - empty revision",
+			converter: g,
+			input: godepImporterInput{
+				json: godepJSON{
+					Imports: []godepPackage{
+						{
+							ImportPath: "github.com/sdboyer/deptest",
+						},
 					},
 				},
 			},
 			wantConvertErr: true,
 		},
-		"sub-packages": {
-			json: godepJSON{
-				Imports: []godepPackage{
-					{
-						ImportPath: "github.com/sdboyer/deptest",
-						// This revision has 2 versions attached to it, v1.0.0 & v0.8.0.
-						Rev: "ff2948a2ac8f538c4ecd55962e919d1e13e74baf",
-					},
-					{
-						ImportPath: "github.com/sdboyer/deptest/foo",
-						// This revision has 2 versions attached to it, v1.0.0 & v0.8.0.
-						Rev: "ff2948a2ac8f538c4ecd55962e919d1e13e74baf",
+		{
+			name:      "sub-packages",
+			converter: g,
+			input: godepImporterInput{
+				json: godepJSON{
+					Imports: []godepPackage{
+						{
+							ImportPath: "github.com/sdboyer/deptest",
+							// This revision has 2 versions attached to it, v1.0.0 & v0.8.0.
+							Rev: "ff2948a2ac8f538c4ecd55962e919d1e13e74baf",
+						},
+						{
+							ImportPath: "github.com/sdboyer/deptest/foo",
+							// This revision has 2 versions attached to it, v1.0.0 & v0.8.0.
+							Rev: "ff2948a2ac8f538c4ecd55962e919d1e13e74baf",
+						},
 					},
 				},
 			},
@@ -118,77 +142,8 @@ func TestGodepConfig_Convert(t *testing.T) {
 		},
 	}
 
-	h := test.NewHelper(t)
-	defer h.Cleanup()
-
-	ctx := newTestContext(h)
-	sm, err := ctx.SourceManager()
-	h.Must(err)
-	defer sm.Release()
-
-	for name, testCase := range testCases {
-		t.Run(name, func(t *testing.T) {
-			g := newGodepImporter(discardLogger, true, sm)
-			g.json = testCase.json
-
-			manifest, lock, err := g.convert(testCase.projectRoot)
-			if err != nil {
-				if testCase.wantConvertErr {
-					return
-				}
-
-				t.Fatal(err)
-			}
-
-			if len(lock.P) != testCase.wantLockCount {
-				t.Fatalf("Expected lock to have %d project(s), got %d",
-					testCase.wantLockCount,
-					len(lock.P))
-			}
-
-			d, ok := manifest.Constraints[testCase.projectRoot]
-			if !ok {
-				t.Fatalf("Expected the manifest to have a dependency for '%s' but got none",
-					testCase.projectRoot)
-			}
-
-			v := d.Constraint.String()
-			if v != testCase.wantConstraint {
-				t.Fatalf("Expected manifest constraint to be %s, got %s", testCase.wantConstraint, v)
-			}
-
-			p := lock.P[0]
-			if p.Ident().ProjectRoot != testCase.projectRoot {
-				t.Fatalf("Expected the lock to have a project for '%s' but got '%s'",
-					testCase.projectRoot,
-					p.Ident().ProjectRoot)
-			}
-
-			lv := p.Version()
-			lpv, ok := lv.(gps.PairedVersion)
-
-			if !ok {
-				if testCase.matchPairedVersion {
-					t.Fatalf("Expected locked version to be PairedVersion but got %T", lv)
-				}
-
-				return
-			}
-
-			ver := lpv.String()
-			if ver != testCase.wantVersion {
-				t.Fatalf("Expected locked version to be '%s', got %s", testCase.wantVersion, ver)
-			}
-
-			if testCase.wantRevision != "" {
-				rev := lpv.Revision()
-				if rev != testCase.wantRevision {
-					t.Fatalf("Expected locked revision to be '%s', got %s",
-						testCase.wantRevision,
-						rev)
-				}
-			}
-		})
+	for _, tc := range testCases {
+		t.Run(tc.name, tc.test)
 	}
 }
 

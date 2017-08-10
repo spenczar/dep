@@ -33,36 +33,37 @@ func newTestContext(h *test.Helper) *dep.Ctx {
 }
 
 func TestGlideConfig_Convert(t *testing.T) {
-	testCases := map[string]struct {
-		yaml                glideYaml
-		lock                *glideLock
-		wantConvertErr      bool
-		matchPairedVersion  bool
-		projectRoot         gps.ProjectRoot
-		wantSourceRepo      string
-		wantConstraint      string
-		wantRevision        gps.Revision
-		wantVersion         string
-		wantLockCount       int
-		wantIgnoreCount     int
-		wantIgnoredPackages []string
-	}{
-		"project": {
-			yaml: glideYaml{
-				Imports: []glidePackage{
-					{
-						Name:       "github.com/sdboyer/deptest",
-						Repository: "https://github.com/sdboyer/deptest.git",
-						Reference:  "v1.0.0",
+	h := test.NewHelper(t)
+	defer h.Cleanup()
+
+	ctx := newTestContext(h)
+	sm, err := ctx.SourceManager()
+	h.Must(err)
+	defer sm.Release()
+
+	g := newGlideImporter(discardLogger, true, sm)
+
+	testCases := []importConverterTestCase{
+		{
+			name:      "project",
+			converter: g,
+			input: glideImporterInput{
+				yaml: glideYaml{
+					Imports: []glidePackage{
+						{
+							Name:       "github.com/sdboyer/deptest",
+							Repository: "https://github.com/sdboyer/deptest.git",
+							Reference:  "v1.0.0",
+						},
 					},
 				},
-			},
-			lock: &glideLock{
-				Imports: []glideLockedPackage{
-					{
-						Name:       "github.com/sdboyer/deptest",
-						Repository: "https://github.com/sdboyer/deptest.git",
-						Reference:  "ff2948a2ac8f538c4ecd55962e919d1e13e74baf",
+				lock: &glideLock{
+					Imports: []glideLockedPackage{
+						{
+							Name:       "github.com/sdboyer/deptest",
+							Repository: "https://github.com/sdboyer/deptest.git",
+							Reference:  "ff2948a2ac8f538c4ecd55962e919d1e13e74baf",
+						},
 					},
 				},
 			},
@@ -74,20 +75,24 @@ func TestGlideConfig_Convert(t *testing.T) {
 			wantRevision:       gps.Revision("ff2948a2ac8f538c4ecd55962e919d1e13e74baf"),
 			wantVersion:        "v1.0.0",
 		},
-		"test project": {
-			yaml: glideYaml{
-				Imports: []glidePackage{
-					{
-						Name:      "github.com/sdboyer/deptest",
-						Reference: "v1.0.0",
+		{
+			name:      "test project",
+			converter: g,
+			input: glideImporterInput{
+				yaml: glideYaml{
+					Imports: []glidePackage{
+						{
+							Name:      "github.com/sdboyer/deptest",
+							Reference: "v1.0.0",
+						},
 					},
 				},
-			},
-			lock: &glideLock{
-				Imports: []glideLockedPackage{
-					{
-						Name:      "github.com/sdboyer/deptest",
-						Reference: "ff2948a2ac8f538c4ecd55962e919d1e13e74baf",
+				lock: &glideLock{
+					Imports: []glideLockedPackage{
+						{
+							Name:      "github.com/sdboyer/deptest",
+							Reference: "ff2948a2ac8f538c4ecd55962e919d1e13e74baf",
+						},
 					},
 				},
 			},
@@ -96,139 +101,58 @@ func TestGlideConfig_Convert(t *testing.T) {
 			wantConstraint: "^1.0.0",
 			wantVersion:    "v1.0.0",
 		},
-		"with ignored package": {
-			yaml: glideYaml{
-				Ignores: []string{"github.com/sdboyer/deptest"},
+		{
+			name:      "with ignored package",
+			converter: g,
+			input: glideImporterInput{
+				yaml: glideYaml{
+					Ignores: []string{"github.com/sdboyer/deptest"},
+				},
 			},
 			projectRoot:         "github.com/sdboyer/deptest",
 			wantIgnoreCount:     1,
 			wantIgnoredPackages: []string{"github.com/sdboyer/deptest"},
 		},
-		"with exclude dir": {
-			yaml: glideYaml{
-				ExcludeDirs: []string{"samples"},
+		{
+			name:      "with exclude dir",
+			converter: g,
+			input: glideImporterInput{
+				yaml: glideYaml{
+					ExcludeDirs: []string{"samples"},
+				},
 			},
 			projectRoot:         testProjectRoot,
 			wantIgnoreCount:     1,
 			wantIgnoredPackages: []string{"github.com/golang/notexist/samples"},
 		},
-		"exclude dir ignores mismatched package name": {
-			yaml: glideYaml{
-				Name:        "github.com/golang/mismatched-package-name",
-				ExcludeDirs: []string{"samples"},
+		{
+			name:      "exclude dir ignores mismatched package name",
+			converter: g,
+			input: glideImporterInput{
+				yaml: glideYaml{
+					Name:        "github.com/golang/mismatched-package-name",
+					ExcludeDirs: []string{"samples"},
+				},
 			},
 			projectRoot:         testProjectRoot,
 			wantIgnoreCount:     1,
 			wantIgnoredPackages: []string{"github.com/golang/notexist/samples"},
 		},
-		"bad input, empty package name": {
-			yaml: glideYaml{
-				Imports: []glidePackage{{Name: ""}},
+		{
+			name:      "bad input, empty package name",
+			converter: g,
+			input: glideImporterInput{
+				yaml: glideYaml{
+					Imports: []glidePackage{{Name: ""}},
+				},
 			},
 			projectRoot:    testProjectRoot,
 			wantConvertErr: true,
 		},
 	}
 
-	h := test.NewHelper(t)
-	defer h.Cleanup()
-
-	ctx := newTestContext(h)
-	sm, err := ctx.SourceManager()
-	h.Must(err)
-	defer sm.Release()
-
-	for name, testCase := range testCases {
-		t.Run(name, func(t *testing.T) {
-			g := newGlideImporter(discardLogger, true, sm)
-			g.yaml = testCase.yaml
-
-			if testCase.lock != nil {
-				g.lock = testCase.lock
-			}
-
-			manifest, lock, err := g.convert(testCase.projectRoot)
-			if err != nil {
-				if testCase.wantConvertErr {
-					return
-				}
-
-				t.Fatal(err)
-			}
-
-			// Lock checks.
-			if lock != nil && len(lock.P) != testCase.wantLockCount {
-				t.Fatalf("Expected lock to have %d project(s), got %d",
-					testCase.wantLockCount,
-					len(lock.P))
-			}
-
-			// Ignored projects checks.
-			if len(manifest.Ignored) != testCase.wantIgnoreCount {
-				t.Fatalf("Expected manifest to have %d ignored project(s), got %d",
-					testCase.wantIgnoreCount,
-					len(manifest.Ignored))
-			}
-
-			if !equalSlice(manifest.Ignored, testCase.wantIgnoredPackages) {
-				t.Fatalf("Expected manifest to have ignore %s, got %s",
-					strings.Join(testCase.wantIgnoredPackages, ", "),
-					strings.Join(manifest.Ignored, ", "))
-			}
-
-			// Constraints checks below. Skip if there is no want constraint.
-			if testCase.wantConstraint == "" {
-				return
-			}
-
-			d, ok := manifest.Constraints[testCase.projectRoot]
-			if !ok {
-				t.Fatalf("Expected the manifest to have a dependency for '%s' but got none",
-					testCase.projectRoot)
-			}
-
-			v := d.Constraint.String()
-			if v != testCase.wantConstraint {
-				t.Fatalf("Expected manifest constraint to be %s, got %s", testCase.wantConstraint, v)
-			}
-
-			p := lock.P[0]
-
-			if p.Ident().ProjectRoot != testCase.projectRoot {
-				t.Fatalf("Expected the lock to have a project for '%s' but got '%s'",
-					testCase.projectRoot,
-					p.Ident().ProjectRoot)
-			}
-
-			if p.Ident().Source != testCase.wantSourceRepo {
-				t.Fatalf("Expected locked source to be %s, got '%s'", testCase.wantSourceRepo, p.Ident().Source)
-			}
-
-			lv := p.Version()
-			lpv, ok := lv.(gps.PairedVersion)
-
-			if !ok {
-				if testCase.matchPairedVersion {
-					t.Fatalf("Expected locked version to be PairedVersion but got %T", lv)
-				}
-
-				return
-			}
-
-			ver := lpv.String()
-			if ver != testCase.wantVersion {
-				t.Fatalf("Expected locked version to be '%s', got %s", testCase.wantVersion, ver)
-			}
-
-			if testCase.wantRevision != "" {
-				rev := lpv.Revision()
-				if rev != testCase.wantRevision {
-					t.Fatalf("Expected locked revision to be '%s', got %s",
-						testCase.wantRevision,
-						rev)
-				}
-			}
-		})
+	for _, tc := range testCases {
+		t.Run(tc.name, tc.test)
 	}
 }
 
