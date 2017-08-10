@@ -40,6 +40,9 @@ func (c importConverterTestCase) test(t *testing.T) {
 		in := c.input.(glideImporterInput)
 		i.yaml = in.yaml
 		i.lock = in.lock
+	case *vndrImporter:
+		in := c.input.(vndrImporterInput)
+		i.packages = in.packages
 	default:
 		t.Fatalf("unknown importer type: %T", i)
 	}
@@ -50,6 +53,10 @@ func (c importConverterTestCase) test(t *testing.T) {
 			return
 		}
 		t.Fatal(err)
+	} else {
+		if c.wantConvertErr {
+			t.Fatal("expected err, got nil")
+		}
 	}
 
 	if lock != nil && len(lock.P) != c.wantLockCount {
@@ -140,3 +147,9 @@ type glideImporterInput struct {
 }
 
 func (glideImporterInput) importerInput() {}
+
+type vndrImporterInput struct {
+	packages []vndrPackage
+}
+
+func (vndrImporterInput) importerInput() {}
